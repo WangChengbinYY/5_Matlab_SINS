@@ -133,7 +133,7 @@ profile on
 profile viewer    
     
 
-% Plot_avp(avp_Leo);
+Plot_avp(avp_Leo);
 %  Plot_avp_Compare(avp,avp_Leo);
 % Plot_xkpk_compare(xkpk,xkpk_Leo);
 % Plot_bias_compare(bias,bias_Leo);

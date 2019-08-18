@@ -1,7 +1,5 @@
 function insdata_now = INS_Update(insdata_pre,insdata_now,T)
-% 计算补偿过的g在n系下的投影
-% Inputs:   pos = [lat;lon;h] 纬度、经度、高程，单位弧度 m
-% Output:   g_n     单位 m/s2
+% 纯惯性解算，时间更新
 %
 % Copyright(c) 2018, by Chengbin Wang, All rights reserved.
 % Department of Precision Instrument Engineering Research Center for 
@@ -35,20 +33,23 @@ function insdata_now = INS_Update(insdata_pre,insdata_now,T)
     temp = 2*temp_w_ie_n;
     temp = temp+temp_w_en_n;
     temp = cross(temp,temp_Vn_half);
-    temp = temp_gn-temp;
+    temp = temp_gn-temp;     %这个地方牵扯gn的正负问题！这默认为 东北天坐标系
     temp_DeltaV_cor_n = T*temp;
     %计算 DeltaV_rot_b
     temp_DeltaV_rot_b = 0.5*cross(insdata_now.DeltaTheta_ib_b,insdata_now.DeltaV_ib_b);
-    %计算 DeltaV_roll_b
+    %计算 DeltaV_scul_b
     temp = cross(insdata_pre.DeltaTheta_ib_b,insdata_now.DeltaV_ib_b);
     temp1 = cross(insdata_pre.DeltaV_ib_b,insdata_now.DeltaTheta_ib_b);
     temp_DeltaV_roll_b = (temp+temp1)/12.0;
     %计算 DeltaV_sf_n  相当于YGM中的 dvbm
     dvbm = insdata_now.DeltaV_ib_b+temp_DeltaV_rot_b+temp_DeltaV_roll_b;
-    %对加速度计进行零偏补偿
-    dvbm = dvbm-insdata_now.IMUError.acc_bias*T;
-    insdata_now.fb = dvbm/T;
-    insdata_now.fn = insdata_pre.C_b_n*insdata_now.fb;
+    
+        % 零偏误差补偿待定！！！ 
+        %对加速度计进行零偏补偿    问题：为啥在这里补偿，而不是在最开始使用加速度计数据的时候补偿？
+%         dvbm = dvbm-insdata_now.IMUError.acc_bias*T;
+        insdata_now.fb = dvbm/T;
+        insdata_now.fn = insdata_pre.C_b_n*insdata_now.fb;
+    
     tempM = askew_v2m(temp_w_in_n)*T/2.0;
     tempM = eye(3) - tempM;
     temp_DeltaV_sf_n = tempM*insdata_pre.C_b_n*(dvbm);    
@@ -56,6 +57,10 @@ function insdata_now = INS_Update(insdata_pre,insdata_now,T)
     insdata_now.DeltaV_n = temp_DeltaV_sf_n + temp_DeltaV_cor_n;
     %计算 当前时刻的速度
     insdata_now.vel = insdata_pre.vel + insdata_now.DeltaV_n;
+    
+    
+    insdata_now.DeltaV_n = [0;0;0];    
+    insdata_now.vel = [0;0;0];    
     
 %% 四、位置更新
     temp_DeltaS = (insdata_pre.vel+insdata_now.vel)*T/2.0;
@@ -65,10 +70,18 @@ function insdata_now = INS_Update(insdata_pre,insdata_now,T)
 %% 五、姿态更新    
     %1. 求取 四元数Q_nm_1_nm
     %利用新的 速度 位置，重新计算 w_in_n ，并计算当前时刻的DeltaTheta_in_n
-    insdata_now.w_ie_n = earth_get_w_ie_n(insdata_now.pos);
-    insdata_now.Rmh = earth_get_Rmh(insdata_now.pos);
-    insdata_now.Rnh = earth_get_Rnh(insdata_now.pos);
-    insdata_now.w_en_n = earth_get_w_en_n(insdata_now.pos,insdata_now.vel,insdata_now.Rmh,insdata_now.Rnh);
+    temp_pos = [0.698294524225869;2.030216593994910;42.9];
+ 
+    insdata_now.w_ie_n = earth_get_w_ie_n(temp_pos);
+    insdata_now.Rmh = earth_get_Rmh(temp_pos);
+    insdata_now.Rnh = earth_get_Rnh(temp_pos);
+    insdata_now.w_en_n = earth_get_w_en_n(temp_pos,[0;0;0],insdata_now.Rmh,insdata_now.Rnh);  
+    
+%     insdata_now.w_ie_n = earth_get_w_ie_n(insdata_now.pos);
+%     insdata_now.Rmh = earth_get_Rmh(insdata_now.pos);
+%     insdata_now.Rnh = earth_get_Rnh(insdata_now.pos);
+%     insdata_now.w_en_n = earth_get_w_en_n(insdata_now.pos,insdata_now.vel,insdata_now.Rmh,insdata_now.Rnh);
+  
     insdata_now.w_in_n = insdata_now.w_ie_n+insdata_now.w_en_n;
     insdata_now.DeltaTheta_in_n = (insdata_pre.w_in_n+insdata_now.w_in_n)*T/2.0;
     %由DeltaTheta_in_n 计算 对应的四元数temp_Q_nm_nm_1
@@ -80,8 +93,11 @@ function insdata_now = INS_Update(insdata_pre,insdata_now,T)
     %2. 求取 四元数 Q_bm_bm_1
     %计算对应的旋转矢量 temp_fi_ib_b
     temp_fi_ib_b = insdata_now.DeltaTheta_ib_b + cross(insdata_pre.DeltaTheta_ib_b,insdata_now.DeltaTheta_ib_b)/12.0;
-    %对陀螺零偏进行补偿，先不考虑非线性比例因子误差
-    temp_fi_ib_b = temp_fi_ib_b - insdata_now.IMUError.gyr_bias*T;
+        
+        %待定。。。
+        %对陀螺零偏进行补偿，先不考虑非线性比例因子误差
+%         temp_fi_ib_b = temp_fi_ib_b - insdata_now.IMUError.gyr_bias*T;
+        
     %由 旋转矢量 temp_fi_ib_b 求对应的四元数 temp_Q_bm_bm_1
     temp_Q_bm_bm_1 = change_rv2Q(temp_fi_ib_b);
     insdata_now.Q_b_n = calculate_QmulQ(calculate_QmulQ(temp_Q_nm_1_nm,insdata_pre.Q_b_n),temp_Q_bm_bm_1);
